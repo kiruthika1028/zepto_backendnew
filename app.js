@@ -11,14 +11,17 @@ const secretKey = process.env.JWT_SECRET || "your_secret_key"; // Use .env for s
 
 // Middleware
 app.use(express.json()); // Parse JSON requests
-app.use(cors()); // Enable CORS
+app.use(cors({
+  origin: ["http://localhost:5173", "https://your-frontend-url.com"], credentials: true
+}));
+ // Enable CORS
 
 // MongoDB Connection
 const mongourl = process.env.MONGO_URI || "mongodb+srv://kiruthika24:kiruthika@cluster0.ipdec.mongodb.net/zepto";
 mongoose
   .connect(mongourl, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
-    console.log("✅ Database connected successfully");
+    console.log("✅ Database connected successfully to:", mongourl);
     app.listen(port, () => {
       console.log(`🚀 Server is running at http://localhost:${port}`);
     });
@@ -38,9 +41,20 @@ const userSchema = new mongoose.Schema(
 );
 const User = mongoose.model("User", userSchema);
 
+// Order Schema
+const orderSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    items: [{ name: String, quantity: Number, price: Number }],
+    totalAmount: { type: Number, required: true },
+  },
+  { versionKey: false }
+);
+const Order = mongoose.model("Order", orderSchema, "zeptocs"); // Force collection name
+
 // ✅ Signup Route
 app.post("/api/signup", async (req, res) => {
-  console.log("Received Data:", req.body); // Debugging
+  console.log("🔹 Signup Request Body:", req.body); // Debugging
 
   try {
     const { username, email, password } = req.body;
@@ -56,6 +70,7 @@ app.post("/api/signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ username, email, password: hashedPassword });
     await newUser.save();
+    console.log("✅ User saved to MongoDB:", newUser);
 
     res.status(201).json({ message: "User registered successfully" });
   } catch (error) {
@@ -63,19 +78,6 @@ app.post("/api/signup", async (req, res) => {
     res.status(500).json({ message: "Error in signup" });
   }
 });
-
-// app.post("/api/signup", async (req, res) => {
-//   const { username, email,password } = req.body;
-//   try {
-//     const hashedPassword = await bcrypt.hash(password, 10);
-//     const newUser = new User({ username,email, password: hashedPassword });
-//     const savedUser = await newUser.save();
-//     res.status(200).json({ message: "User registered successfully", user: savedUser });
-//   } catch (error) {
-//     res.status(500).json({ message: "Error registering user", error: error.message });
-//   }
-// });
-
 
 // ✅ Login Route
 app.post("/api/login", async (req, res) => {
@@ -100,6 +102,26 @@ app.post("/api/login", async (req, res) => {
   } catch (error) {
     console.error("❌ Error logging in:", error.message);
     res.status(500).json({ message: "Error in login" });
+  }
+});
+
+// ✅ Place Order Route
+app.post("/api/order", async (req, res) => {
+  try {
+    console.log("🔹 Order Request Body:", req.body);
+    const { userId, items, totalAmount } = req.body;
+    if (!userId || !items.length || !totalAmount) {
+      return res.status(400).json({ message: "Incomplete order details" });
+    }
+
+    const newOrder = new Order({ userId, items, totalAmount });
+    await newOrder.save();
+    console.log("✅ Order saved to MongoDB (zeptocs collection):", newOrder);
+
+    res.status(201).json({ message: "Order placed successfully" });
+  } catch (error) {
+    console.error("❌ Error placing order:", error.message);
+    res.status(500).json({ message: "Error in order processing" });
   }
 });
 
