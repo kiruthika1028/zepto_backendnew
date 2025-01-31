@@ -1,138 +1,119 @@
-const express = require("express"); // Import express module
-const mongoose = require("mongoose"); // Import mongoose for database interaction
-const { v4: uuidv4 } = require("uuid"); // Import UUID for unique IDs
+const express = require("express");
+const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+require("dotenv").config(); // Load environment variables
 
 const app = express();
-const port = 5000; // Port for the backend server
+const port = 5000;
+const secretKey = process.env.JWT_SECRET || "your_secret_key"; // Use .env for security
 
-// MongoDB connection string
-const mongourl = "mongodb+srv://kiruthika24:kiruthika@cluster0.ipdec.mongodb.net/zepto";
+// Middleware
+app.use(express.json()); // Parse JSON requests
+app.use(cors()); // Enable CORS
 
-// Connect to MongoDB
+// MongoDB Connection
+const mongourl = process.env.MONGO_URI || "mongodb+srv://kiruthika24:kiruthika@cluster0.ipdec.mongodb.net/zepto";
 mongoose
-  .connect(mongourl)
+  .connect(mongourl, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
-    console.log("Database connected successfully");
+    console.log("✅ Database connected successfully");
     app.listen(port, () => {
-      console.log(`Server is running at port ${port}`);
+      console.log(`🚀 Server is running at http://localhost:${port}`);
     });
   })
   .catch((err) => {
-    console.error("Database connection failed:", err.message);
+    console.error("❌ Database connection failed:", err.message);
   });
 
-// Middleware to parse JSON requests
-app.use(express.json());
-
-// Define Order Schema and Model
-const orderSchema = new mongoose.Schema(
+// User Schema
+const userSchema = new mongoose.Schema(
   {
-    id: { type: String, required: true, unique: true },
-    name: { type: String, required: true },
-    price: { type: Number, required: true },
-    quantity: { type: Number, required: true },
+    username: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
   },
-  { versionKey: false } // Disable __v field
+  { versionKey: false }
 );
+const User = mongoose.model("User", userSchema);
 
-const orderModel = mongoose.model("zeptoc", orderSchema);
+// ✅ Signup Route
+// app.post("/api/signup", async (req, res) => {
+//   console.log("Received Data:", req.body); // Debugging
 
-// Get all orders
-app.get("/api/orders", async (req, res) => {
+//   try {
+//     const { username, email, password } = req.body;
+//     if (!username || !email || !password) {
+//       return res.status(400).json({ message: "All fields are required" });
+//     }
+
+//     const existingUser = await User.findOne({ email });
+//     if (existingUser) {
+//       return res.status(400).json({ message: "Email already exists" });
+//     }
+
+//     const hashedPassword = await bcrypt.hash(password, 10);
+//     const newUser = new User({ username, email, password: hashedPassword });
+//     await newUser.save();
+
+//     res.status(201).json({ message: "User registered successfully" });
+//   } catch (error) {
+//     console.error("❌ Error signing up:", error.message);
+//     res.status(500).json({ message: "Error in signup" });
+//   }
+// });
+
+app.post("/api/signup", async (req, res) => {
+  const { username, email,password } = req.body;
   try {
-    const orders = await orderModel.find();
-    res.status(200).json(orders);
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, password: hashedPassword });
+    const savedUser = await newUser.save();
+    res.status(200).json({ message: "User registered successfully", user: savedUser });
   } catch (error) {
-    console.error("Error fetching orders:", error.message);
-    res.status(500).json({ message: "Failed to fetch orders" });
+    res.status(500).json({ message: "Error registering user", error: error.message });
   }
 });
 
-// Create a new order
-app.post("/api/orders", async (req, res) => {
-  try {
-    const { name, price, quantity } = req.body;
 
-    if (!name || !price || !quantity) {
-      return res.status(400).json({ message: "All fields (name, price, quantity) are required" });
+// ✅ Login Route
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    const newOrder = new orderModel({
-      id: uuidv4(), // Generate a unique ID
-      name,
-      price,
-      quantity,
-    });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
 
-    const savedOrder = await newOrder.save();
-    res.status(201).json(savedOrder);
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    const token = jwt.sign({ userId: user._id, email: user.email }, secretKey, { expiresIn: "1h" });
+    res.status(200).json({ message: "Login successful", token });
   } catch (error) {
-    console.error("Error creating order:", error.message);
-    res.status(500).json({ message: "Error in creating order" });
+    console.error("❌ Error logging in:", error.message);
+    res.status(500).json({ message: "Error in login" });
   }
 });
 
-// Get a specific order by ID
-app.get("/api/orders/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const order = await orderModel.findOne({ id });
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" });
-    }
-    res.status(200).json(order);
-  } catch (error) {
-    console.error("Error fetching order:", error.message);
-    res.status(500).json({ message: "Error in fetching order" });
+// ✅ Protected Route Example
+app.get("/api/protected", (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1]; // Extract token
+  if (!token) {
+    return res.status(401).json({ message: "Access denied. No token provided." });
   }
-});
 
-// Update an existing order by ID
-app.put("/api/orders/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    console.log("ID passed to PUT:", id);
-
-    const updatedData = req.body;
-    if (Object.keys(updatedData).length === 0) {
-      return res.status(400).json({ message: "At least one field must be provided to update" });
-    }
-
-    const orderExists = await orderModel.findOne({ id });
-    if (!orderExists) {
-      return res.status(404).json({ message: "Order not found" });
-    }
-
-    const updatedOrder = await orderModel.findOneAndUpdate(
-      { id },
-      { $set: updatedData },
-      { new: true }
-    );
-
-    res.status(200).json(updatedOrder);
+    const decoded = jwt.verify(token, secretKey);
+    res.status(200).json({ message: "Access granted", user: decoded });
   } catch (error) {
-    console.error("Error updating order:", error.message);
-    res.status(500).json({ message: "Error in updating order" });
+    res.status(401).json({ message: "Invalid token" });
   }
-});
-
-// Delete an order by ID
-app.delete("/api/orders/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const deletedOrder = await orderModel.findOneAndDelete({ id });
-    if (!deletedOrder) {
-      return res.status(404).json({ message: "Order not found" });
-    }
-    res.status(200).json({ message: "Order deleted successfully", deletedOrder });
-  } catch (error) {
-    console.error("Error deleting order:", error.message);
-    res.status(500).json({ message: "Error in deleting order" });
-  }
-});
-
-// Global error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: "Something went wrong!", error: err.message });
 });
