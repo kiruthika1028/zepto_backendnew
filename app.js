@@ -1,3 +1,4 @@
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
@@ -35,37 +36,48 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model("users", userSchema);
 
-// Product Schema
-const productSchema = new mongoose.Schema({
-  id: Number,
-  name: String,
-  price: Number,
-  image: String,
-});
-const Product = mongoose.model("products", productSchema);
-
-// Preload product data
-const products = [
-  { id: 1, name: "DairyMilk", price: 80, image: "https://neelamfoodlandmumbai.com/cdn/shop/products/IMG_8871_b1d52ae2-802f-4f7b-a6b0-d1b28c49480b_800x.jpg?v=1674132352" },
-  { id: 2, name: "KinderJoy (Harry Potter edition)", price: 50, image: "https://rukminim2.flixcart.com/image/720/864/xif0q/chocolate/m/s/f/-original-imah4gpxmhf6hg7h.jpeg?q=60&crop=false" },
-  { id: 3, name: "Milk Packet", price: 24, image: "https://cdn.grofers.com/cdn-cgi/image/f=auto,fit=scale-down,q=70,metadata=none,w=360/app/assets/products/sliding_images/jpeg/5ee4441d-9109-48fa-9343-f5ce82b905a6.jpg?ts=1706182143" },
-  { id: 4, name: "Whole Wheat Bread", price: 40, image: "https://5.imimg.com/data5/HH/HD/IE/SELLER-2726350/whole-wheat-bread.jpeg" },
-  { id: 5, name: "Tropicana Delight", price: 70, image: "https://m.media-amazon.com/images/I/71ZNcuBUV5L.jpg" },
-  { id: 6, name: "Tomatoes (1 kg)", price: 30, image: "https://upload.wikimedia.org/wikipedia/commons/8/89/Tomato_je.jpg" },
-  { id: 7, name: "Carrots (1 kg)", price: 45, image: "https://rukminim2.flixcart.com/image/850/1000/kt7jv680/vegetable/n/l/g/250-carrot-un-branded-no-whole-original-imag6hqkxx6znyhe.jpeg?q=90&crop=false" },
-  { id: 8, name: "Soap", price: 15, image: "https://rukminim2.flixcart.com/image/850/1000/jyg5lzk0/soap/q/g/9/5-375-oil-clear-glow-soap-bar-75-gms-pack-of-5-pears-original-imafhmwfhus6hnzf.jpeg?q=20&crop=false" },
-  { id: 9, name: "Paneer (Cottage Cheese)", price: 120, image: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRa3Z0vkwv41ltM4UIuMLhFxHaqn98rpZl0jg" },
-  { id: 10, name: "Eggs (Dozen)", price: 90, image: "https://m.media-amazon.com/images/I/411IYeXfFxL._AC_UF894,1000_QL80_.jpg" },
-];
-Product.insertMany(products).catch(() => {});
-
 // Order Schema
 const orderSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "users", required: true },
-  items: [{ productId: Number, name: String, price: Number, quantity: Number }],
+  items: [{ productId: String, quantity: Number }],
   totalAmount: { type: Number, required: true },
 }, { timestamps: true });
 const Order = mongoose.model("orders", orderSchema);
+
+// ✅ Signup Route
+app.post("/api/signup", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, email, password: hashedPassword });
+    await newUser.save();
+    res.status(201).json({ message: "User registered successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Error signing up", error: error.message });
+  }
+});
+
+// ✅ Login Route
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
+    const token = jwt.sign({ userId: user._id, email: user.email }, secretKey, { expiresIn: "1h" });
+    res.status(200).json({ message: "Login successful", token });
+  } catch (error) {
+    res.status(500).json({ message: "Error in login", error: error.message });
+  }
+});
 
 // ✅ Place Order
 app.post("/api/orders", async (req, res) => {
@@ -91,4 +103,23 @@ app.get("/api/orders/:userId", async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
   }
+});
+
+// ✅ Protected Route
+const authorize = (req, res, next) => {
+  const token = req.headers["authorization"]?.split(" ")[1];
+  if (!token) {
+    return res.status(403).json({ message: "No token provided" });
+  }
+  jwt.verify(token, secretKey, (err, userInfo) => {
+    if (err) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    req.user = userInfo;
+    next();
+  });
+};
+
+app.get("/api/protected", authorize, (req, res) => {
+  res.json({ message: "Access granted", user: req.user });
 });
